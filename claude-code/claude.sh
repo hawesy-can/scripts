@@ -88,7 +88,7 @@ function sanitize_context()
     local raw_context="${1%[M]}"
     claude_context=$((10#$raw_context * 1048576))
   else
-    usage "E: Unknown SI suffix on '${claude_context}'"
+    claude_context=$((10#$claude_context))
   fi
 }
 
