@@ -1,16 +1,18 @@
 #!/bin/bash
 #
-# Invoke claude-code with a selected model provider/model.
+# Invoke a coding agent with a selected model provider/model.
 #
 # Default models are configured for each provider that are reasonable in
 # cost/performance, but can be selected.
 
-# Will be exported to other enviroment for claude-code to use.
+# Provider settings used by the selected agent.
 claude_anthropic_base_url=
 claude_anthropic_auth_token=
+claude_anthropic_api_key=
 claude_anthropic_model=
 
-# Command-line configuation
+# Command-line configuration
+claude_agent="claude-code"
 claude_provider="copilot-api"
 claude_model=""
 claude_select_model=false
@@ -27,12 +29,14 @@ function usage()
 {
   cat >&2 <<EOF
 USAGE
-  $0 [--provider PROVIDER] [--help|-h]
-     [--model MODEL | --select-model --list-models ]
+  $0 [--agent AGENT] [--provider PROVIDER] [--help|-h]
+     [--model MODEL | --select-model | --list-models]
      [--context CONTEXT] [--host HOST] [--port PORT]
-     [<--> CLAUDE_CODE_OPTIONS]
+     [-- AGENT_OPTIONS]
 
 WHERE
+  AGENT
+    One of 'claude-code' or 'opencode'. Defaults to 'claude-code'.
   PROVIDER
     One of 'openrouter', 'copilot-api', 'lemonade' or 'ollama'. Defaults to
     'copilot-api'.
@@ -62,6 +66,18 @@ EOF
   fi
 }
 
+function check_agent()
+{
+  case "$1" in
+    "claude-code"|"opencode")
+      return
+      ;;
+    *)
+      usage "E: Invalid agent '${1:-}'"
+      ;;
+  esac
+}
+
 function check_provider()
 {
   case "$1" in
@@ -74,22 +90,25 @@ function check_provider()
   esac
 }
 
+function normalize_context()
+{
+  local raw_context="$1"
+
+  [[ "$raw_context" =~ ^[1-9][0-9]*[kM]?$ ]] || return 1
+
+  case "$raw_context" in
+    *k) context_tokens=$((10#${raw_context%k} * 1024)) ;;
+    *M) context_tokens=$((10#${raw_context%M} * 1048576)) ;;
+    *)  context_tokens=$((10#$raw_context)) ;;
+  esac
+}
+
 function sanitize_context()
 {
-  if ! [[ "${claude_context}" =~ ^[1-9][0-9]*[kM]?$ ]]; then
-    usage "E: Bad context: '${claude_context}'"
-  fi
+  local context_tokens
 
-  # Now convert the context into a raw number
-  if [[ "${claude_context}" =~ ^.*k$ ]]; then
-    local raw_context="${1%[k]}"
-    claude_context=$((10#$raw_context * 1024))
-  elif [[ "${claude_context}" =~ ^.*M$ ]]; then
-    local raw_context="${1%[M]}"
-    claude_context=$((10#$raw_context * 1048576))
-  else
-    claude_context=$((10#$claude_context))
-  fi
+  normalize_context "$claude_context" || usage "E: Bad context: '${claude_context}'"
+  claude_context="$context_tokens"
 }
 
 function check_host()
@@ -116,34 +135,82 @@ function get_models()
 
 function get_model_context()
 {
-  local claude_remote_context=$(
+  local claude_remote_context context_tokens
+  claude_remote_context=$(
     curl "${curl_extra_args[@]}" -s "${claude_anthropic_base_url}/v1/models" | \
       jq --arg model_id "$claude_anthropic_model" \
         '.data[] | select(.id == $model_id) | .capabilities.limits.max_context_window_tokens')
 
-  # Ensure we just retrieved a number. If not, use the user's supplied
-  # context, which is guaranteed to be a number - or empty.
-  if ! [[ "${claude_remote_context:-}" =~ ^[1-9][0-9]*[kM]?$ ]]; then
-    claude_remote_context="${claude_context}"
-  fi
-
-  # Here, both contexts are numbers or empty.
-  # If the user did not request claude context then we can use the value we just retrieved.
-  if [ -z "${claude_context:-}" ]; then
-    claude_context="${claude_remote_context}"
-  fi
-
-  # If either or both is empty we can't compare numerically so just return.
-  if [ -z "${claude_context}" ] || [ -z "${claude_remote_context}" ]; then
+  # Normalize valid provider limits before comparing them or writing JSON.
+  # If the provider has no usable limit, retain the user's requested context.
+  if ! normalize_context "$claude_remote_context"; then
     return
   fi
+  claude_remote_context="$context_tokens"
 
-  # If the user's requested context exceeds the model's then clamp the
-  # context to the max requested.
-  if [ ${claude_context} -gt ${claude_remote_context} ]; then
-    claude_context=$claude_remote_context
+  if [ -z "$claude_context" ] || [ "$claude_context" -gt "$claude_remote_context" ]; then
+    claude_context="$claude_remote_context"
   fi
 }
+
+function run_claude()
+{
+  [ -n "${claude_anthropic_base_url:-}" ] && export ANTHROPIC_BASE_URL="${claude_anthropic_base_url}"
+  [ -n "${claude_anthropic_auth_token:-}" ] && export ANTHROPIC_AUTH_TOKEN="${claude_anthropic_auth_token}"
+  [ -n "${claude_anthropic_api_key:-}" ] && export ANTHROPIC_API_KEY="${claude_anthropic_api_key}"
+  [ -n "${claude_anthropic_model:-}" ] && export ANTHROPIC_MODEL="${claude_anthropic_model}"
+
+  # Enables Claude Code's gateway model discovery.
+  export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+
+  # If the user requested context (or the model provided it) then set the max
+  # context. Otherwise just force Claude to wait for the API to tell it when
+  # context has exceeded.
+  if [ -n "${claude_context:-}" ]; then
+    export CLAUDE_CODE_MAX_CONTEXT_TOKENS="${claude_context}"
+  else
+    export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
+  fi
+
+  claude-code "$@"
+}
+
+# Use a subshell so the EXIT trap runs while the local config_dir is in scope.
+function run_opencode() (
+  local config_dir
+  local config_file
+
+  config_dir=$(mktemp -d) || return 1
+  trap 'rm -rf -- "$config_dir"' EXIT
+  config_file="${config_dir}/opencode.json"
+
+  # OpenCode reads this file alongside its normal configuration. Keep the
+  # credentials in the environment rather than writing them to disk.
+  jq -n \
+    --arg model "$claude_anthropic_model" \
+    --argjson context "${claude_context:-null}" \
+    '{"$schema": "https://opencode.ai/config.json",
+      model: ("gateway/" + $model),
+      providers: {
+        gateway: {
+          name: "OpenAI-compatible gateway",
+          env: ["OPENAI_API_KEY"],
+          package: "@opencode/ai/providers/openai-compatible",
+          settings: {baseURL: "{env:OPENAI_BASE_URL}"},
+          models: {($model): ({name: $model} +
+            (if $context == null then {} else {limit: {context: $context}} end))}
+        }
+      }}' > "$config_file" || return 1
+
+  # The configured providers expose OpenAI-compatible endpoints at /v1.
+  export OPENAI_BASE_URL="${claude_anthropic_base_url}/v1"
+  # OpenCode uses OPENAI_API_KEY for either credential type: prefer the
+  # provider's API key, falling back to its bearer token.
+  export OPENAI_API_KEY="${claude_anthropic_api_key:-$claude_anthropic_auth_token}"
+  export OPENCODE_CONFIG="$config_file"
+
+  opencode "$@"
+)
 
 function print_models()
 {
@@ -167,7 +234,7 @@ function print_models()
 
 parsed_args=$(getopt \
   --options "h" \
-  --long "provider:,help,model:,select-model,list-models,context:,host:,port:" \
+  --long "agent:,provider:,help,model:,select-model,list-models,context:,host:,port:" \
   --name "$0" \
   -- "$@"
 )
@@ -183,6 +250,11 @@ eval "set -- $parsed_args"
 
 while true; do
   case "$1" in
+    --agent)
+      claude_agent="${2:-}"
+      check_agent "${claude_agent}"
+      shift 2
+      ;;
     --provider)
       claude_provider="${2:-}"
       check_provider "${claude_provider}"
@@ -329,22 +401,18 @@ fi
 
 get_model_context
 
-[ -n "${claude_anthropic_base_url:-}" ] && export ANTHROPIC_BASE_URL="${claude_anthropic_base_url}"
-[ -n "${claude_anthropic_auth_token:-}" ] && export ANTHROPIC_AUTH_TOKEN="${claude_anthropic_auth_token}"
-[ -n "${claude_anthropic_api_key:-}" ] && export ANTHROPIC_API_KEY="${claude_anthropic_api_key}"
-[ -n "${claude_anthropic_model:-}" ] && export ANTHROPIC_MODEL="${claude_anthropic_model}"
-
-# Enables claude's gateway model discovery.
-export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
-
-# If the user requested context (or the model provided it) then set the max
-# context. Otherwise just force Claude to wait for the API to tell it when
-# context has exceeded.
-if [ -n "${claude_context:-}" ]; then
-  export CLAUDE_CODE_MAX_CONTEXT_TOKENS="${claude_context}"
-else
-  export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
-fi
-
-claude-code "${@}"
+case "$claude_agent" in
+  "claude-code")
+    run_claude "$@"
+    ;;
+  "opencode")
+    run_opencode "$@"
+    ;;
+  *)
+    # Defensive: validation should reject unknown agents, but catch a new
+    # accepted agent whose runner has not been added here.
+    echo "E: No runner for agent '$claude_agent'." >&2
+    exit 1
+    ;;
+esac
 

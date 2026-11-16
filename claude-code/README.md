@@ -1,15 +1,24 @@
-# Claude-Code Wrapper
+# Coding Agent Wrapper
 
-This wrapper lets me select between openai-compatible endpoints to connect my
-agent to. It's a little hacky but it works.
+This wrapper selects an OpenAI-compatible endpoint and model for Claude Code or
+OpenCode. It defaults to Claude Code; use `--agent opencode` to launch OpenCode.
+Arguments after `--` are forwarded to the selected agent.
 
-I use lemonade-server, ollama, openrouter and copilot (via copilot-api).
+For OpenCode, the wrapper generates a temporary config file and points
+`OPENCODE_CONFIG` at it. The file selects the requested model through an
+OpenAI-compatible gateway, while `OPENAI_BASE_URL` and `OPENAI_API_KEY` carry
+the endpoint and provider credential in the child process environment. The
+file is removed when OpenCode exits. Model context is included when reported
+by the provider or set with `--context`.
+
+Supported providers are lemonade-server, Ollama, OpenRouter and Copilot (via
+copilot-api). The wrapper requires `curl` and `jq`.
 
 ## Copilot
 
 Install any copilot-api wrapper for copilot and it will give you a local
 openai-compatible port. The default is 4141 but can be overridden with the
---port option. Defaults to gpt-5.4-mini to save a few cents.
+--port option. Defaults to gpt-6-luna.
 
 ## Lemonade
 
@@ -18,12 +27,12 @@ work quite well on 32G RAM + 8G GPU.
 
 ## Ollama
 
-Defaults to the default ollama port of 11343 and qwen3-coder:30b (although
+Defaults to the default Ollama port of 11434 and qwen3-coder:30b (although
 that's a tight fit on most laptops).
 
 ## OpenRouter
 
-Defaults to the usual openrouter endpoint. To authenticate, set
-OPENROUTER_AUTH_TOKEN in your environment to the token you want to use.
+Defaults to the usual OpenRouter endpoint and openai/gpt-6-luna. To authenticate,
+set `OPENROUTER_AUTH_TOKEN` in your environment to the token you want to use.
 The model list for OpenRouter includes so many models, but many are forbidden
 by the token. There are plans to improve this later.
