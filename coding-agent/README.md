@@ -5,7 +5,13 @@ OpenCode. It defaults to Claude Code; use `--agent opencode` to launch OpenCode.
 Arguments after `--` are forwarded to the selected agent.
 
 For OpenCode, the wrapper generates a temporary config file and points
-`OPENCODE_CONFIG` at it; the file is removed when OpenCode exits. For
+`OPENCODE_CONFIG` at it; the file is removed when OpenCode exits. OpenCode is
+also launched with `--standalone`, so it runs against a private server that
+actually reads the generated config: by default OpenCode connects to its
+shared background service, which keeps the configuration it was started with
+and ignores the `OPENCODE_CONFIG` of later clients - the selected model would
+silently lose to whatever model that service was started with. Wrapper runs
+therefore do not share session state with the background service. For
 OpenRouter the file selects the requested model through OpenCode's builtin
 OpenRouter provider, with `OPENROUTER_API_KEY` carrying the credential. For
 other providers it selects the model through an OpenAI-compatible gateway,

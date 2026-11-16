@@ -483,7 +483,15 @@ function run_opencode() (
 
   export OPENCODE_CONFIG="$config_file"
 
-  opencode "$@"
+  # opencode normally connects to a shared background service ("opencode
+  # serve --service") when one is running, and that service resolves its
+  # configuration from its own launch environment - the OPENCODE_CONFIG
+  # exported here never reaches it. A service that outlives the wrapper
+  # run which started it keeps serving that run's model to every later
+  # client, silently overriding the model selected here. Force a private
+  # server per invocation so the generated config - and only it - drives
+  # the run.
+  opencode --standalone "$@"
 )
 
 # Print the model catalog as a table with context, ZDR and price columns,
