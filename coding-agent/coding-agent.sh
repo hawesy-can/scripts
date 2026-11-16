@@ -6,24 +6,24 @@
 # cost/performance, but can be selected.
 
 # Provider settings used by the selected agent.
-claude_anthropic_base_url=
-claude_anthropic_auth_token=
-claude_anthropic_api_key=
-claude_anthropic_model=
+agent_anthropic_base_url=
+agent_anthropic_auth_token=
+agent_anthropic_api_key=
+agent_anthropic_model=
 
 # Command-line configuration
-claude_agent="claude-code"
-claude_provider="copilot-api"
-claude_model=""
-claude_select_model=false
-claude_list_models=false
-claude_context=""
-claude_host=""
-claude_port=""
+agent="claude-code"
+agent_provider="copilot-api"
+agent_model=""
+agent_select_model=false
+agent_list_models=false
+agent_context=""
+agent_host=""
+agent_port=""
 
 curl_extra_args=()
-claude_models=()
-claude_models_default_idx=
+agent_models=()
+agent_models_default_idx=
 
 function usage()
 {
@@ -107,8 +107,8 @@ function sanitize_context()
 {
   local context_tokens
 
-  normalize_context "$claude_context" || usage "E: Bad context: '${claude_context}'"
-  claude_context="$context_tokens"
+  normalize_context "$agent_context" || usage "E: Bad context: '${agent_context}'"
+  agent_context="$context_tokens"
 }
 
 function check_host()
@@ -129,36 +129,36 @@ function check_port()
 
 function get_models()
 {
-  mapfile -t claude_models < <(curl "${curl_extra_args[@]}" -s "${claude_anthropic_base_url}/v1/models" | \
+  mapfile -t agent_models < <(curl "${curl_extra_args[@]}" -s "${agent_anthropic_base_url}/v1/models" | \
     jq -r '.data[].id' | sort)
 } 
 
 function get_model_context()
 {
-  local claude_remote_context context_tokens
-  claude_remote_context=$(
-    curl "${curl_extra_args[@]}" -s "${claude_anthropic_base_url}/v1/models" | \
-      jq --arg model_id "$claude_anthropic_model" \
+  local agent_remote_context context_tokens
+  agent_remote_context=$(
+    curl "${curl_extra_args[@]}" -s "${agent_anthropic_base_url}/v1/models" | \
+      jq --arg model_id "$agent_anthropic_model" \
         '.data[] | select(.id == $model_id) | .capabilities.limits.max_context_window_tokens')
 
   # Normalize valid provider limits before comparing them or writing JSON.
   # If the provider has no usable limit, retain the user's requested context.
-  if ! normalize_context "$claude_remote_context"; then
+  if ! normalize_context "$agent_remote_context"; then
     return
   fi
-  claude_remote_context="$context_tokens"
+  agent_remote_context="$context_tokens"
 
-  if [ -z "$claude_context" ] || [ "$claude_context" -gt "$claude_remote_context" ]; then
-    claude_context="$claude_remote_context"
+  if [ -z "$agent_context" ] || [ "$agent_context" -gt "$agent_remote_context" ]; then
+    agent_context="$agent_remote_context"
   fi
 }
 
 function run_claude()
 {
-  [ -n "${claude_anthropic_base_url:-}" ] && export ANTHROPIC_BASE_URL="${claude_anthropic_base_url}"
-  [ -n "${claude_anthropic_auth_token:-}" ] && export ANTHROPIC_AUTH_TOKEN="${claude_anthropic_auth_token}"
-  [ -n "${claude_anthropic_api_key:-}" ] && export ANTHROPIC_API_KEY="${claude_anthropic_api_key}"
-  [ -n "${claude_anthropic_model:-}" ] && export ANTHROPIC_MODEL="${claude_anthropic_model}"
+  [ -n "${agent_anthropic_base_url:-}" ] && export ANTHROPIC_BASE_URL="${agent_anthropic_base_url}"
+  [ -n "${agent_anthropic_auth_token:-}" ] && export ANTHROPIC_AUTH_TOKEN="${agent_anthropic_auth_token}"
+  [ -n "${agent_anthropic_api_key:-}" ] && export ANTHROPIC_API_KEY="${agent_anthropic_api_key}"
+  [ -n "${agent_anthropic_model:-}" ] && export ANTHROPIC_MODEL="${agent_anthropic_model}"
 
   # Enables Claude Code's gateway model discovery.
   export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
@@ -166,8 +166,8 @@ function run_claude()
   # If the user requested context (or the model provided it) then set the max
   # context. Otherwise just force Claude to wait for the API to tell it when
   # context has exceeded.
-  if [ -n "${claude_context:-}" ]; then
-    export CLAUDE_CODE_MAX_CONTEXT_TOKENS="${claude_context}"
+  if [ -n "${agent_context:-}" ]; then
+    export CLAUDE_CODE_MAX_CONTEXT_TOKENS="${agent_context}"
   else
     export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
   fi
@@ -187,8 +187,8 @@ function run_opencode() (
   # OpenCode reads this file alongside its normal configuration. Keep the
   # credentials in the environment rather than writing them to disk.
   jq -n \
-    --arg model "$claude_anthropic_model" \
-    --argjson context "${claude_context:-null}" \
+    --arg model "$agent_anthropic_model" \
+    --argjson context "${agent_context:-null}" \
     '{"$schema": "https://opencode.ai/config.json",
       model: ("gateway/" + $model),
       providers: {
@@ -203,10 +203,10 @@ function run_opencode() (
       }}' > "$config_file" || return 1
 
   # The configured providers expose OpenAI-compatible endpoints at /v1.
-  export OPENAI_BASE_URL="${claude_anthropic_base_url}/v1"
+  export OPENAI_BASE_URL="${agent_anthropic_base_url}/v1"
   # OpenCode uses OPENAI_API_KEY for either credential type: prefer the
   # provider's API key, falling back to its bearer token.
-  export OPENAI_API_KEY="${claude_anthropic_api_key:-$claude_anthropic_auth_token}"
+  export OPENAI_API_KEY="${agent_anthropic_api_key:-$agent_anthropic_auth_token}"
   export OPENCODE_CONFIG="$config_file"
 
   opencode "$@"
@@ -214,17 +214,17 @@ function run_opencode() (
 
 function print_models()
 {
-  local claude_models_idx=0
+  local agent_models_idx=0
 
-  while [ ${claude_models_idx} -lt ${#claude_models[@]} ]; do
-    if [ "${claude_models[${claude_models_idx}]}" = "${claude_anthropic_model}" ]; then
-      printf "%4d: * %s\n" "${claude_models_idx}" "${claude_models[${claude_models_idx}]}"
-      claude_models_default_idx="${claude_models_idx}"
+  while [ ${agent_models_idx} -lt ${#agent_models[@]} ]; do
+    if [ "${agent_models[${agent_models_idx}]}" = "${agent_anthropic_model}" ]; then
+      printf "%4d: * %s\n" "${agent_models_idx}" "${agent_models[${agent_models_idx}]}"
+      agent_models_default_idx="${agent_models_idx}"
     else
-      printf "%4d:   %s\n" "${claude_models_idx}" "${claude_models[${claude_models_idx}]}"
+      printf "%4d:   %s\n" "${agent_models_idx}" "${agent_models[${agent_models_idx}]}"
     fi
 
-    ((claude_models_idx++))
+    ((agent_models_idx++))
   done
 }
 
@@ -251,43 +251,43 @@ eval "set -- $parsed_args"
 while true; do
   case "$1" in
     --agent)
-      claude_agent="${2:-}"
-      check_agent "${claude_agent}"
+      agent="${2:-}"
+      check_agent "${agent}"
       shift 2
       ;;
     --provider)
-      claude_provider="${2:-}"
-      check_provider "${claude_provider}"
+      agent_provider="${2:-}"
+      check_provider "${agent_provider}"
       shift 2
       ;;
     -h|--help)
       usage
       ;;
     --model)
-      claude_model="${2:-}"
+      agent_model="${2:-}"
       shift 2
       ;;
     --select-model)
-      claude_select_model=true
+      agent_select_model=true
       shift
       ;;
     --list-models)
-      claude_list_models=true
+      agent_list_models=true
       shift
       ;;
     --context)
-      claude_context="${2:-}"
-      sanitize_context "${claude_context}"
+      agent_context="${2:-}"
+      sanitize_context "${agent_context}"
       shift 2
       ;;
     --host)
-      claude_host="${2:-}"
-      check_host "${claude_host}"
+      agent_host="${2:-}"
+      check_host "${agent_host}"
       shift 2
       ;;
     --port)
-      claude_port="${2:-}"
-      check_port "${claude_port}"
+      agent_port="${2:-}"
+      check_port "${agent_port}"
       shift 2
       ;;
     --)
@@ -302,50 +302,50 @@ while true; do
 done
 
 # Sanity check.
-if [ "${claude_select_model}" = "true" ] && [ "${claude_list_models}" = "true" ]; then
+if [ "${agent_select_model}" = "true" ] && [ "${agent_list_models}" = "true" ]; then
   usage "E: --select-model and --list-models are incompatible."
-elif [ "${claude_select_model}" = "true" ] || [ "${claude_list_models}" = "true" ]; then
-  if [ -n "${claude_model}" ]; then
+elif [ "${agent_select_model}" = "true" ] || [ "${agent_list_models}" = "true" ]; then
+  if [ -n "${agent_model}" ]; then
     usage "E: --select-model/--list-models is incompatible with --model."
   fi
 fi
 
 # Check that openrouter did not supply --host or --port.
-if [ "${claude_provider}" = "openrouter" ]; then
-  if [ -n "${claude_host}" ] || [ -n "${claude_port}" ]; then
-    usage "E: Selected provider '${claude_provider}' does not accept --host or --port."
+if [ "${agent_provider}" = "openrouter" ]; then
+  if [ -n "${agent_host}" ] || [ -n "${agent_port}" ]; then
+    usage "E: Selected provider '${agent_provider}' does not accept --host or --port."
   fi
 fi
 
 # Set the --host and --port defaults
-case "${claude_provider}" in
+case "${agent_provider}" in
   "copilot-api")
-    [ -z "${claude_host}" ] && claude_host="127.0.0.1"
-    [ -z "${claude_port}" ] && claude_port="4141"
+    [ -z "${agent_host}" ] && agent_host="127.0.0.1"
+    [ -z "${agent_port}" ] && agent_port="4141"
 
-    claude_anthropic_base_url="http://${claude_host}:${claude_port}"
-    claude_anthropic_auth_token="copilot"
-    claude_anthropic_model="${claude_model:-gpt-6-luna}"
+    agent_anthropic_base_url="http://${agent_host}:${agent_port}"
+    agent_anthropic_auth_token="copilot"
+    agent_anthropic_model="${agent_model:-gpt-6-luna}"
     ;;
   "lemonade")
-    [ -z "${claude_host}" ] && claude_host="127.0.0.1"
-    [ -z "${claude_port}" ] && claude_port="13305"
+    [ -z "${agent_host}" ] && agent_host="127.0.0.1"
+    [ -z "${agent_port}" ] && agent_port="13305"
 
-    claude_anthropic_base_url="http://${claude_host}:${claude_port}"
-    claude_anthropic_api_key="lemonade"
-    claude_anthropic_model="${claude_model:-Gemma-4-12B-it-MTP-GGUF}"
+    agent_anthropic_base_url="http://${agent_host}:${agent_port}"
+    agent_anthropic_api_key="lemonade"
+    agent_anthropic_model="${agent_model:-Gemma-4-12B-it-MTP-GGUF}"
     ;;
   "ollama")
-    [ -z "${claude_host}" ] && claude_host="127.0.0.1"
-    [ -z "${claude_port}" ] && claude_port="11434"
+    [ -z "${agent_host}" ] && agent_host="127.0.0.1"
+    [ -z "${agent_port}" ] && agent_port="11434"
 
-    claude_anthropic_base_url="http://${claude_host}:${claude_port}"
-    claude_anthropic_auth_token="ollama"
-    claude_anthropic_model="${claude_model:-qwen3-coder:30b}"
+    agent_anthropic_base_url="http://${agent_host}:${agent_port}"
+    agent_anthropic_auth_token="ollama"
+    agent_anthropic_model="${agent_model:-qwen3-coder:30b}"
     ;;
   "openrouter")
-    claude_host="openrouter.ai"
-    claude_port="443"
+    agent_host="openrouter.ai"
+    agent_port="443"
 
     if [ -z "${OPENROUTER_AUTH_TOKEN:-}" ]; then
       echo "E: OPENROUTER_AUTH_TOKEN must be set before calling this script."
@@ -353,55 +353,55 @@ case "${claude_provider}" in
     fi
 
     # "Claude Code Key" on openrouter.ai - silicon-alliances workspace $50/month
-    claude_anthropic_base_url="https://openrouter.ai/api"
-    claude_anthropic_auth_token="${OPENROUTER_AUTH_TOKEN}"
-    claude_anthropic_model="${claude_model:-openai/gpt-6-luna}"
+    agent_anthropic_base_url="https://openrouter.ai/api"
+    agent_anthropic_auth_token="${OPENROUTER_AUTH_TOKEN}"
+    agent_anthropic_model="${agent_model:-openai/gpt-6-luna}"
     ;;
 esac
 
 # Add auth headers to CURL if they are needed.
-if [ -n "${claude_anthropic_api_key}" ]; then
-  curl_extra_args+=( "-H" "X-API-Key: ${claude_anthropic_api_key}" )
+if [ -n "${agent_anthropic_api_key}" ]; then
+  curl_extra_args+=( "-H" "X-API-Key: ${agent_anthropic_api_key}" )
 fi
 
-if [ -n "${claude_anthropic_auth_token}" ]; then
-  curl_extra_args+=( "-H" "Authorization: Bearer ${claude_anthropic_auth_token}" )
+if [ -n "${agent_anthropic_auth_token}" ]; then
+  curl_extra_args+=( "-H" "Authorization: Bearer ${agent_anthropic_auth_token}" )
 fi
 
 # Assume everyone's openai compatible:
-if [ "${claude_list_models}" = "true" ] || [ "${claude_select_model}" = "true" ]; then
-  echo "Models available for ${claude_provider}:"
+if [ "${agent_list_models}" = "true" ] || [ "${agent_select_model}" = "true" ]; then
+  echo "Models available for ${agent_provider}:"
   echo
   get_models
   print_models
 
-  if [ "${claude_list_models}" = "true" ]; then
+  if [ "${agent_list_models}" = "true" ]; then
     exit
   fi
 
   echo
-  read -p "Select model index, ENTER for default, CTRL-C to cancel: " claude_models_idx
+  read -p "Select model index, ENTER for default, CTRL-C to cancel: " agent_models_idx
 
-  if [ -z "${claude_models_idx}" ]; then
-    claude_models_idx="${claude_models_default_idx}"
+  if [ -z "${agent_models_idx}" ]; then
+    agent_models_idx="${agent_models_default_idx}"
   fi
 
   ## Sanity check even the default model index (not else-if with above).
-  if ! [[ "${claude_models_idx}" =~ ^[0-9][0-9]*$ ]]; then
+  if ! [[ "${agent_models_idx}" =~ ^[0-9][0-9]*$ ]]; then
     echo "Invalid input; please enter a number (>=0)." >&2
     exit 1
-  elif [ ${claude_models_idx} -ge ${#claude_models[@]} ]; then
+  elif [ ${agent_models_idx} -ge ${#agent_models[@]} ]; then
     echo "Input out of range." >&2
     exit 1
   fi
 
-  claude_anthropic_model="${claude_models[${claude_models_idx}]}"
-  echo "Selected '${claude_anthropic_model}'."
+  agent_anthropic_model="${agent_models[${agent_models_idx}]}"
+  echo "Selected '${agent_anthropic_model}'."
 fi
 
 get_model_context
 
-case "$claude_agent" in
+case "$agent" in
   "claude-code")
     run_claude "$@"
     ;;
@@ -411,7 +411,7 @@ case "$claude_agent" in
   *)
     # Defensive: validation should reject unknown agents, but catch a new
     # accepted agent whose runner has not been added here.
-    echo "E: No runner for agent '$claude_agent'." >&2
+    echo "E: No runner for agent '$agent'." >&2
     exit 1
     ;;
 esac
